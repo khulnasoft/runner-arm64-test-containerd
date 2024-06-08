@@ -46,10 +46,9 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 
-	csapi "github.com/containerd/containerd/v2/api/services/content/v1"
-	diffapi "github.com/containerd/containerd/v2/api/services/diff/v1"
-	sbapi "github.com/containerd/containerd/v2/api/services/sandbox/v1"
-	ssapi "github.com/containerd/containerd/v2/api/services/snapshots/v1"
+	diffapi "github.com/containerd/containerd/api/services/diff/v1"
+	sbapi "github.com/containerd/containerd/api/services/sandbox/v1"
+	ssapi "github.com/containerd/containerd/api/services/snapshots/v1"
 	srvconfig "github.com/containerd/containerd/v2/cmd/containerd/server/config"
 	csproxy "github.com/containerd/containerd/v2/core/content/proxy"
 	"github.com/containerd/containerd/v2/core/diff"
@@ -507,7 +506,7 @@ func LoadPlugins(ctx context.Context, config *srvconfig.Config) ([]plugin.Regist
 		case string(plugins.ContentPlugin), "content":
 			t = plugins.ContentPlugin
 			f = func(conn *grpc.ClientConn) interface{} {
-				return csproxy.NewContentStore(csapi.NewContentClient(conn))
+				return csproxy.NewContentStore(conn)
 			}
 		case string(plugins.SandboxControllerPlugin), "sandbox":
 			t = plugins.SandboxControllerPlugin

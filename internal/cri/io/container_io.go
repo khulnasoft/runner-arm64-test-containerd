@@ -18,14 +18,15 @@ package io
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"sync"
 
-	"github.com/containerd/containerd/v2/pkg/cio"
 	"github.com/containerd/log"
 
 	"github.com/containerd/containerd/v2/internal/cri/util"
+	"github.com/containerd/containerd/v2/pkg/cio"
 	cioutil "github.com/containerd/containerd/v2/pkg/ioutil"
 )
 
@@ -39,7 +40,7 @@ type ContainerIO struct {
 	id string
 
 	fifos *cio.FIFOSet
-	*stdioPipes
+	*stdioStream
 
 	stdoutGroup *cioutil.WriterGroup
 	stderrGroup *cioutil.WriterGroup
@@ -71,6 +72,31 @@ func WithNewFIFOs(root string, tty, stdin bool) ContainerIOOpts {
 	}
 }
 
+// WithStreams creates new streams for the container io.
+// The stream address is in format of `protocol://address?stream_id=xyz`.
+// It allocates ContainerID-stdin, ContainerID-stdout and ContainerID-stderr as streaming IDs.
+// For example, that advertiser address of shim is `ttrpc+unix:///run/demo.sock` and container ID is `app`.
+// There are three streams if stdin is enabled and TTY is disabled.
+//
+//   - Stdin: ttrpc+unix:///run/demo.sock?stream_id=app-stdin
+//   - Stdout: ttrpc+unix:///run/demo.sock?stream_id=app-stdout
+//   - stderr: ttrpc+unix:///run/demo.sock?stream_id=app-stderr
+//
+// The streaming IDs will be used as unique key to establish stream tunnel.
+// And it should support reconnection with the same streaming ID if containerd restarts.
+func WithStreams(address string, tty, stdin bool) ContainerIOOpts {
+	return func(c *ContainerIO) error {
+		if address == "" {
+			return fmt.Errorf("address can not be empty for io stream")
+		}
+		fifos, err := newStreams(address, c.id, tty, stdin)
+		if err != nil {
+			return err
+		}
+		return WithFIFOs(fifos)(c)
+	}
+}
+
 // NewContainerIO creates container io.
 func NewContainerIO(id string, opts ...ContainerIOOpts) (_ *ContainerIO, err error) {
 	c := &ContainerIO{
@@ -87,11 +113,11 @@ func NewContainerIO(id string, opts ...ContainerIOOpts) (_ *ContainerIO, err err
 		return nil, errors.New("fifos are not set")
 	}
 	// Create actual fifos.
-	stdio, closer, err := newStdioPipes(c.fifos)
+	stdio, closer, err := newStdioStream(c.fifos)
 	if err != nil {
 		return nil, err
 	}
-	c.stdioPipes = stdio
+	c.stdioStream = stdio
 	c.closer = closer
 	return c, nil
 }

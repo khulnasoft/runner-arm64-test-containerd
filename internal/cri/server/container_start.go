@@ -23,16 +23,16 @@ import (
 	"io"
 	"time"
 
-	containerd "github.com/containerd/containerd/v2/client"
-	containerdio "github.com/containerd/containerd/v2/pkg/cio"
 	"github.com/containerd/errdefs"
 	"github.com/containerd/log"
 	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
 
+	containerd "github.com/containerd/containerd/v2/client"
 	cio "github.com/containerd/containerd/v2/internal/cri/io"
 	containerstore "github.com/containerd/containerd/v2/internal/cri/store/container"
 	sandboxstore "github.com/containerd/containerd/v2/internal/cri/store/sandbox"
 	ctrdutil "github.com/containerd/containerd/v2/internal/cri/util"
+	containerdio "github.com/containerd/containerd/v2/pkg/cio"
 	cioutil "github.com/containerd/containerd/v2/pkg/ioutil"
 )
 
@@ -118,6 +118,14 @@ func (c *criService) StartContainer(ctx context.Context, r *runtime.StartContain
 	if ociRuntime.Path != "" {
 		taskOpts = append(taskOpts, containerd.WithRuntimePath(ociRuntime.Path))
 	}
+
+	// append endpoint to the options so that task manager can get task api endpoint directly
+	endpoint := sandbox.Endpoint
+	if endpoint.IsValid() {
+		taskOpts = append(taskOpts,
+			containerd.WithTaskAPIEndpoint(endpoint.Address, endpoint.Version))
+	}
+
 	task, err := container.NewTask(ctx, ioCreation, taskOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create containerd task: %w", err)
@@ -171,7 +179,7 @@ func (c *criService) StartContainer(ctx context.Context, r *runtime.StartContain
 	}
 
 	// It handles the TaskExit event and update container state after this.
-	c.eventMonitor.startContainerExitMonitor(context.Background(), id, task.Pid(), exitCh)
+	c.startContainerExitMonitor(context.Background(), id, task.Pid(), exitCh)
 
 	c.generateAndSendContainerEvent(ctx, id, sandboxID, runtime.ContainerEventType_CONTAINER_STARTED_EVENT)
 

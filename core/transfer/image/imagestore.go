@@ -23,8 +23,8 @@ import (
 	"github.com/containerd/typeurl/v2"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 
-	"github.com/containerd/containerd/v2/api/types"
-	transfertypes "github.com/containerd/containerd/v2/api/types/transfer"
+	"github.com/containerd/containerd/api/types"
+	transfertypes "github.com/containerd/containerd/api/types/transfer"
 	"github.com/containerd/containerd/v2/core/content"
 	"github.com/containerd/containerd/v2/core/images"
 	"github.com/containerd/containerd/v2/core/images/archive"
@@ -346,6 +346,10 @@ func (is *Store) Lookup(ctx context.Context, store images.Store) ([]images.Image
 		imgs = append(imgs, img)
 	}
 	return imgs, nil
+}
+
+func (is *Store) Platforms() []ocispec.Platform {
+	return is.platforms
 }
 
 func (is *Store) UnpackPlatforms() []transfer.UnpackConfiguration {

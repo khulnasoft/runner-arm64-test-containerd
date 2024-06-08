@@ -65,7 +65,7 @@ func WithMounts(osi osinterface.OS, config *runtime.ContainerConfig, extra []*ru
 
 		// Sort mounts in number of parts. This ensures that high level mounts don't
 		// shadow other mounts.
-		sort.Sort(orderedMounts(mounts))
+		sort.Stable(orderedMounts(mounts))
 
 		// Mount cgroup into the container as readonly, which inherits docker's behavior.
 		s.Mounts = append(s.Mounts, runtimespec.Mount{
@@ -357,7 +357,7 @@ func WithResources(resources *runtime.LinuxContainerResources, tolerateMissingHu
 			s.Linux.Resources.CPU.Cpus = cpus
 		}
 		if mems := resources.GetCpusetMems(); mems != "" {
-			s.Linux.Resources.CPU.Mems = resources.GetCpusetMems()
+			s.Linux.Resources.CPU.Mems = mems
 		}
 		if limit != 0 {
 			s.Linux.Resources.Memory.Limit = &limit

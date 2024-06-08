@@ -22,10 +22,10 @@ import (
 	"fmt"
 	"syscall"
 
-	"github.com/containerd/containerd/v2/api/types"
+	"github.com/containerd/containerd/api/types"
+	"github.com/containerd/containerd/api/types/runc/options"
 	"github.com/containerd/containerd/v2/core/images"
 	"github.com/containerd/containerd/v2/core/mount"
-	"github.com/containerd/containerd/v2/core/runtime/v2/runc/options"
 	"github.com/containerd/errdefs"
 	"github.com/opencontainers/runtime-spec/specs-go"
 )
@@ -46,6 +46,23 @@ func WithRootFS(mounts []mount.Mount) NewTaskOpts {
 func WithRuntimePath(absRuntimePath string) NewTaskOpts {
 	return func(ctx context.Context, client *Client, info *TaskInfo) error {
 		info.RuntimePath = absRuntimePath
+		return nil
+	}
+}
+
+// WithTaskAPIEndpoint allow task service to manage a task through a given endpoint,
+// usually it is served inside a sandbox, and we can get it from sandbox status.
+func WithTaskAPIEndpoint(address string, version uint32) NewTaskOpts {
+	return func(ctx context.Context, client *Client, info *TaskInfo) error {
+		if info.Options == nil {
+			info.Options = &options.Options{}
+		}
+		opts, ok := info.Options.(*options.Options)
+		if !ok {
+			return errors.New("invalid runtime v2 options format")
+		}
+		opts.TaskApiAddress = address
+		opts.TaskApiVersion = version
 		return nil
 	}
 }

@@ -24,20 +24,22 @@ import (
 	"github.com/containerd/log"
 	"github.com/containerd/plugin"
 	"github.com/containerd/plugin/registry"
+	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
 
-	eventtypes "github.com/containerd/containerd/v2/api/events"
+	eventtypes "github.com/containerd/containerd/api/events"
 	containerd "github.com/containerd/containerd/v2/client"
 	"github.com/containerd/containerd/v2/core/sandbox"
 	criconfig "github.com/containerd/containerd/v2/internal/cri/config"
 	"github.com/containerd/containerd/v2/internal/cri/constants"
+	"github.com/containerd/containerd/v2/internal/cri/server/events"
 	"github.com/containerd/containerd/v2/internal/cri/server/podsandbox/types"
 	imagestore "github.com/containerd/containerd/v2/internal/cri/store/image"
 	ctrdutil "github.com/containerd/containerd/v2/internal/cri/util"
 	"github.com/containerd/containerd/v2/pkg/oci"
 	osinterface "github.com/containerd/containerd/v2/pkg/os"
+	"github.com/containerd/containerd/v2/pkg/protobuf"
 	"github.com/containerd/containerd/v2/plugins"
-	"github.com/containerd/containerd/v2/protobuf"
 	"github.com/containerd/errdefs"
 	"github.com/containerd/platforms"
 )
@@ -85,16 +87,17 @@ func init() {
 				imageService:   criImagePlugin.(ImageService),
 				store:          NewStore(),
 			}
+
+			eventMonitor := events.NewEventMonitor(&podSandboxEventHandler{
+				controller: &c,
+			})
+			eventMonitor.Subscribe(client, []string{`topic=="/tasks/exit"`})
+			eventMonitor.Start()
+			c.eventMonitor = eventMonitor
+
 			return &c, nil
 		},
 	})
-}
-
-// CRIService interface contains things required by controller, but not yet refactored from criService.
-// TODO: this will be removed in subsequent iterations.
-type CRIService interface {
-	// TODO: we should implement Event backoff in Controller.
-	BackOffEvent(id string, event interface{})
 }
 
 // RuntimeService specifies dependencies to CRI runtime service.
@@ -123,21 +126,16 @@ type Controller struct {
 	imageService ImageService
 	// os is an interface for all required os operations.
 	os osinterface.OS
-	// cri is CRI service that provides missing gaps needed by controller.
-	cri CRIService
+	// eventMonitor is the event monitor for podsandbox controller to handle sandbox task exit event
+	// actually we only use it's backoff mechanism to make sure pause container is cleaned up.
+	eventMonitor *events.EventMonitor
 
 	store *Store
 }
 
-func (c *Controller) Init(
-	cri CRIService,
-) {
-	c.cri = cri
-}
-
 var _ sandbox.Controller = (*Controller)(nil)
 
-func (c *Controller) Platform(_ctx context.Context, _sandboxID string) (platforms.Platform, error) {
+func (c *Controller) Platform(_ctx context.Context, _sandboxID string) (imagespec.Platform, error) {
 	return platforms.DefaultSpec(), nil
 }
 
@@ -172,11 +170,7 @@ func (c *Controller) waitSandboxExit(ctx context.Context, p *types.PodSandbox, e
 		defer dcancel()
 		event := &eventtypes.TaskExit{ExitStatus: exitStatus, ExitedAt: protobuf.ToTimestamp(exitedAt)}
 		if err := handleSandboxTaskExit(dctx, p, event); err != nil {
-			// TODO will backoff the event to the controller's own EventMonitor, but not cri's,
-			// because we should call handleSandboxTaskExit again the next time
-			// eventMonitor handle this event. but now it goes into cri's EventMonitor,
-			// the handleSandboxTaskExit will not be called anymore
-			c.cri.BackOffEvent(p.ID, e)
+			c.eventMonitor.Backoff(p.ID, event)
 		}
 		return nil
 	case <-ctx.Done():

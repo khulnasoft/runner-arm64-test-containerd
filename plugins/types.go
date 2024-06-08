@@ -71,6 +71,8 @@ const (
 	WarningPlugin plugin.Type = "io.containerd.warning.v1"
 	// CRIServicePlugin implements a cri service
 	CRIServicePlugin plugin.Type = "io.containerd.cri.v1"
+	// ShimPlugin implements a shim service
+	ShimPlugin plugin.Type = "io.containerd.shim.v1"
 )
 
 const (
@@ -90,6 +92,10 @@ const (
 	PropertyStateDir = "io.containerd.plugin.state"
 	// PropertyGRPCAddress is the grpc address used for client connections to containerd
 	PropertyGRPCAddress = "io.containerd.plugin.grpc.address"
-	// PropertyGRPCAddress is the ttrpc address used for client connections to containerd
+	// PropertyTTRPCAddress is the ttrpc address used for client connections to containerd
 	PropertyTTRPCAddress = "io.containerd.plugin.ttrpc.address"
+)
+
+const (
+	SnapshotterRootDir = "root"
 )

@@ -19,10 +19,18 @@ package sandbox
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
-	runtimeAPI "github.com/containerd/containerd/v2/api/runtime/sandbox/v1"
-	"github.com/containerd/containerd/v2/api/types"
+	"github.com/containerd/errdefs"
+	"github.com/containerd/log"
+	"github.com/containerd/plugin"
+	"github.com/containerd/plugin/registry"
+	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
+	"google.golang.org/protobuf/types/known/anypb"
+
+	runtimeAPI "github.com/containerd/containerd/api/runtime/sandbox/v1"
+	"github.com/containerd/containerd/api/types"
 	"github.com/containerd/containerd/v2/core/events"
 	"github.com/containerd/containerd/v2/core/events/exchange"
 	"github.com/containerd/containerd/v2/core/mount"
@@ -30,13 +38,6 @@ import (
 	v2 "github.com/containerd/containerd/v2/core/runtime/v2"
 	"github.com/containerd/containerd/v2/core/sandbox"
 	"github.com/containerd/containerd/v2/plugins"
-	"github.com/containerd/errdefs"
-	"github.com/containerd/log"
-	"github.com/containerd/platforms"
-	"github.com/containerd/plugin"
-	"github.com/containerd/plugin/registry"
-
-	"google.golang.org/protobuf/types/known/anypb"
 )
 
 func init() {
@@ -44,11 +45,11 @@ func init() {
 		Type: plugins.SandboxControllerPlugin,
 		ID:   "shim",
 		Requires: []plugin.Type{
-			plugins.RuntimePluginV2,
+			plugins.ShimPlugin,
 			plugins.EventPlugin,
 		},
 		InitFn: func(ic *plugin.InitContext) (interface{}, error) {
-			shimPlugin, err := ic.GetByID(plugins.RuntimePluginV2, "shim")
+			shimPlugin, err := ic.GetSingle(plugins.ShimPlugin)
 			if err != nil {
 				return nil, err
 			}
@@ -62,16 +63,32 @@ func init() {
 				shims     = shimPlugin.(*v2.ShimManager)
 				publisher = exchangePlugin.(*exchange.Exchange)
 			)
+			state := ic.Properties[plugins.PropertyStateDir]
+			root := ic.Properties[plugins.PropertyRootDir]
+			for _, d := range []string{root, state} {
+				if err := os.MkdirAll(d, 0711); err != nil {
+					return nil, err
+				}
+			}
 
-			return &controllerLocal{
+			if err := shims.LoadExistingShims(ic.Context, root, state); err != nil {
+				return nil, fmt.Errorf("failed to load existing shim sandboxes, %v", err)
+			}
+
+			c := &controllerLocal{
+				root:      root,
+				state:     state,
 				shims:     shims,
 				publisher: publisher,
-			}, nil
+			}
+			return c, nil
 		},
 	})
 }
 
 type controllerLocal struct {
+	root      string
+	state     string
 	shims     *v2.ShimManager
 	publisher events.Publisher
 }
@@ -97,7 +114,7 @@ func (c *controllerLocal) cleanupShim(ctx context.Context, sandboxID string, svc
 	}
 }
 
-func (c *controllerLocal) Create(ctx context.Context, info sandbox.Sandbox, opts ...sandbox.CreateOpt) error {
+func (c *controllerLocal) Create(ctx context.Context, info sandbox.Sandbox, opts ...sandbox.CreateOpt) (retErr error) {
 	var coptions sandbox.CreateOptions
 	sandboxID := info.ID
 	for _, opt := range opts {
@@ -108,7 +125,17 @@ func (c *controllerLocal) Create(ctx context.Context, info sandbox.Sandbox, opts
 		return fmt.Errorf("sandbox %s already running: %w", sandboxID, errdefs.ErrAlreadyExists)
 	}
 
-	shim, err := c.shims.Start(ctx, sandboxID, runtime.CreateOpts{
+	bundle, err := v2.NewBundle(ctx, c.root, c.state, sandboxID, info.Spec)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if retErr != nil {
+			bundle.Delete()
+		}
+	}()
+
+	shim, err := c.shims.Start(ctx, sandboxID, bundle, runtime.CreateOpts{
 		Spec:           info.Spec,
 		RuntimeOptions: info.Runtime.Options,
 		Runtime:        info.Runtime.Name,
@@ -161,26 +188,28 @@ func (c *controllerLocal) Start(ctx context.Context, sandboxID string) (sandbox.
 		c.cleanupShim(ctx, sandboxID, svc)
 		return sandbox.ControllerInstance{}, fmt.Errorf("failed to start sandbox %s: %w", sandboxID, errdefs.FromGRPC(err))
 	}
-
+	address, version := shim.Endpoint()
 	return sandbox.ControllerInstance{
 		SandboxID: sandboxID,
 		Pid:       resp.GetPid(),
+		Address:   address,
+		Version:   uint32(version),
 		CreatedAt: resp.GetCreatedAt().AsTime(),
 	}, nil
 }
 
-func (c *controllerLocal) Platform(ctx context.Context, sandboxID string) (platforms.Platform, error) {
+func (c *controllerLocal) Platform(ctx context.Context, sandboxID string) (imagespec.Platform, error) {
 	svc, err := c.getSandbox(ctx, sandboxID)
 	if err != nil {
-		return platforms.Platform{}, err
+		return imagespec.Platform{}, err
 	}
 
 	response, err := svc.Platform(ctx, &runtimeAPI.PlatformRequest{SandboxID: sandboxID})
 	if err != nil {
-		return platforms.Platform{}, fmt.Errorf("failed to get sandbox platform: %w", errdefs.FromGRPC(err))
+		return imagespec.Platform{}, fmt.Errorf("failed to get sandbox platform: %w", errdefs.FromGRPC(err))
 	}
 
-	var platform platforms.Platform
+	var platform imagespec.Platform
 	if p := response.GetPlatform(); p != nil {
 		platform.OS = p.OS
 		platform.Architecture = p.Architecture
@@ -275,6 +304,12 @@ func (c *controllerLocal) Status(ctx context.Context, sandboxID string, verbose 
 		return sandbox.ControllerStatus{}, fmt.Errorf("failed to query sandbox %s status: %w", sandboxID, err)
 	}
 
+	shim, err := c.shims.Get(ctx, sandboxID)
+	if err != nil {
+		return sandbox.ControllerStatus{}, fmt.Errorf("unable to find sandbox %q", sandboxID)
+	}
+	address, version := shim.Endpoint()
+
 	return sandbox.ControllerStatus{
 		SandboxID: resp.GetSandboxID(),
 		Pid:       resp.GetPid(),
@@ -283,6 +318,8 @@ func (c *controllerLocal) Status(ctx context.Context, sandboxID string, verbose 
 		CreatedAt: resp.GetCreatedAt().AsTime(),
 		ExitedAt:  resp.GetExitedAt().AsTime(),
 		Extra:     resp.GetExtra(),
+		Address:   address,
+		Version:   uint32(version),
 	}, nil
 }
 

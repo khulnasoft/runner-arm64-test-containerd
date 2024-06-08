@@ -34,7 +34,7 @@ TEST_IMAGE_LIST ?=
 # Used to populate variables in version package.
 VERSION ?= $(shell git describe --match 'v[0-9]*' --dirty='.m' --always)
 REVISION ?= $(shell git rev-parse HEAD)$(shell if ! git diff --no-ext-diff --quiet --exit-code; then echo .m; fi)
-PACKAGE=github.com/containerd/containerd
+PACKAGE=github.com/containerd/containerd/v2
 SHIM_CGO_ENABLED ?= 0
 
 ifneq "$(strip $(shell command -v $(GO) 2>/dev/null))" ""
@@ -109,7 +109,6 @@ SHIM_GO_LDFLAGS=-ldflags '-X $(PKG)/version.Version=$(VERSION) -X $(PKG)/version
 # Project packages.
 PACKAGES=$(shell $(GO) list ${GO_TAGS} ./... | grep -v /vendor/ | grep -v /integration)
 API_PACKAGES=$(shell (cd api && $(GO) list ${GO_TAGS} ./... | grep -v /vendor/ | grep -v /integration))
-NON_API_PACKAGES=$(shell $(GO) list ${GO_TAGS} ./... | grep -v /vendor/ | grep -v /integration | grep -v "containerd/api")
 TEST_REQUIRES_ROOT_PACKAGES=$(filter \
     ${PACKAGES}, \
     $(shell \
@@ -151,7 +150,7 @@ GOTEST ?= $(GO) test
 OUTPUTDIR = $(join $(ROOTDIR), _output)
 CRIDIR=$(OUTPUTDIR)/cri
 
-.PHONY: clean all AUTHORS build binaries test integration generate protos check-protos coverage ci check help install uninstall vendor release static-release mandir install-man install-doc genman install-cri-deps cri-release cri-cni-release cri-integration install-deps bin/cri-integration.test
+.PHONY: clean all AUTHORS build binaries test integration generate protos check-protos coverage ci check help install uninstall vendor release static-release mandir install-man install-doc genman install-cri-deps cri-release cri-cni-release cri-integration install-deps bin/cri-integration.test remove-replace clean-vendor
 .DEFAULT: default
 
 # Forcibly set the default goal to all, in case an include above brought in a rule definition.
@@ -178,12 +177,12 @@ protos: bin/protoc-gen-go-fieldpath
 	$(eval TMPDIR := $(shell mktemp -d))
 	@mv ${ROOTDIR}/vendor ${TMPDIR}
 	@(cd ${ROOTDIR}/api && PATH="${ROOTDIR}/bin:${PATH}" protobuild --quiet ${API_PACKAGES})
-	@(PATH="${ROOTDIR}/bin:${PATH}" protobuild --quiet ${NON_API_PACKAGES})
-	find v2 -name '*.pb.go' -exec sh -c 'f={}; mkdir -p $$(dirname "$${f#v2/}"); echo mv $$f $${f#v2/}; mv $$f $${f#v2/}' \;
 	@mv ${TMPDIR}/vendor ${ROOTDIR}
 	@rm -rf ${TMPDIR} v2
-	go-fix-acronym -w -a '^Os' $(shell find api/ core/runtime/ -name '*.pb.go')
-	go-fix-acronym -w -a '(Id|Io|Uuid|Os)$$' $(shell find api/ core/runtime/ -name '*.pb.go')
+	go-fix-acronym -w -a '^Os' $(shell find api/ -name '*.pb.go')
+	go-fix-acronym -w -a '(Id|Io|Uuid|Os)$$' $(shell find api/ -name '*.pb.go')
+	@test -z "$$(git status --short | grep "api/next.pb.txt" | tee /dev/stderr)" || \
+		$(GO) mod edit -replace=github.com/containerd/containerd/api=./api
 
 check-protos: protos ## check if protobufs needs to be generated again
 	@echo "$(WHALE) $@"
@@ -469,22 +468,29 @@ root-coverage: ## generate coverage profiles for unit tests that require root
 		fi; \
 	done )
 
+remove-replace:
+	@echo "$(WHALE) $@"
+	@$(GO) mod edit -dropreplace=github.com/containerd/containerd/api
+
 vendor: ## ensure all the go.mod/go.sum files are up-to-date including vendor/ directory
 	@echo "$(WHALE) $@"
 	@$(GO) mod tidy
 	@$(GO) mod vendor
 	@$(GO) mod verify
-	#@(cd ${ROOTDIR}/integration/client && ${GO} mod tidy)
+	@(cd ${ROOTDIR}/api && ${GO} mod tidy)
 
 verify-vendor: ## verify if all the go.mod/go.sum files are up-to-date
 	@echo "$(WHALE) $@"
 	$(eval TMPDIR := $(shell mktemp -d))
 	@cp -R ${ROOTDIR} ${TMPDIR}
 	@(cd ${TMPDIR}/containerd && ${GO} mod tidy)
-	@(cd ${TMPDIR}/containerd/integration/client && ${GO} mod tidy)
+	@(cd ${TMPDIR}/containerd && ${GO} mod vendor)
+	@(cd ${TMPDIR}/containerd && ${GO} mod verify)
+	@(cd ${TMPDIR}/containerd/api && ${GO} mod tidy)
 	@diff -r -u -q ${ROOTDIR} ${TMPDIR}/containerd
 	@rm -rf ${TMPDIR}
-	#@${ROOTDIR}/script/verify-go-modules.sh integration/client
+
+clean-vendor: remove-replace vendor
 
 
 help: ## this help

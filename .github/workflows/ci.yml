@@ -25,13 +25,16 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-22.04, actuated-arm64-4cpu-16gb, macos-12, windows-2019]
+        exclude:
+          - os: ${{ github.repository != 'containerd/containerd' && 'actuated-arm64-4cpu-16gb' }}
+
 
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/install-go
-      - uses: golangci/golangci-lint-action@v4
+      - uses: golangci/golangci-lint-action@v6
         with:
-          version: v1.56.1
+          version: v1.58.0
           skip-cache: true
           args: --timeout=8m
 
@@ -40,7 +43,6 @@ jobs:
   #
   project:
     name: Project Checks
-    if: github.repository == 'containerd/containerd'
     runs-on: ubuntu-22.04
     timeout-minutes: 5
 
@@ -53,6 +55,7 @@ jobs:
       - uses: ./src/github.com/containerd/containerd/.github/actions/install-go
 
       - uses: containerd/project-checks@v1.1.0
+        if: github.repository == 'containerd/containerd'
         with:
           working-directory: src/github.com/containerd/containerd
           repo-access-token: ${{ secrets.GITHUB_TOKEN }}
@@ -189,10 +192,14 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-22.04, actuated-arm64-4cpu-16gb, macos-12, windows-2019, windows-2022]
-        go-version: ["1.21.6", "1.22.0"]
+        go-version: ["1.22.4"]
+        exclude:
+          - os: ${{ github.repository != 'containerd/containerd' && 'actuated-arm64-4cpu-16gb' }}
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/install-go
+        with:
+          go-version: ${{ matrix.go-version }}
       - name: Make
         run: |
           make build
@@ -380,6 +387,8 @@ jobs:
           - io.containerd.runc.v2
         runc: [runc, crun]
         os: [ubuntu-22.04, actuated-arm64-4cpu-16gb]
+        exclude:
+          - os: ${{ github.repository != 'containerd/containerd' && 'actuated-arm64-4cpu-16gb' }}
 
     env:
       GOTEST: gotestsum --
@@ -471,10 +480,17 @@ jobs:
         run: |
           CONTAINERD_RUNTIME=$TEST_RUNTIME make cri-integration
 
+      - name: Fix up for actuated
+        # https://github.com/containerd/containerd/pull/9920#issuecomment-2024823587
+        if: ${{ (matrix.os == 'actuated-arm64-4cpu-16gb') && (matrix.runc == 'crun') }}
+        run: |
+          echo "EXTRA_CRITEST_OPTIONS=--ginkgo.skip=runtime should support NamespaceMode_POD" >> $GITHUB_ENV
+
       - name: cri-tools critest
         env:
           TEST_RUNTIME: ${{ matrix.runtime }}
         run: |
+          env
           sudo -E PATH=$PATH ./script/critest.sh "${{github.workspace}}/report"
 
       # Log the status of this VM to investigate issues like
@@ -513,7 +529,7 @@ jobs:
       matrix:
         box:
           - fedora/39-cloud-base
-          - rockylinux/8@9.0.0
+          - rockylinux/9@4.0.0
     env:
       BOX: ${{ matrix.box }}
 
@@ -617,7 +633,7 @@ jobs:
     name: Report required job statuses
     runs-on: ubuntu-latest
     # List job dependencies which are required to pass status checks in order to be merged via merge queue.
-    needs: [linters, project, protos, binaries, integration-linux, integration-windows, integration-vagrant, tests-cri-in-userns, tests-mac-os]
+    needs: [linters, project, protos, binaries, integration-linux, integration-windows, tests-cri-in-userns, tests-mac-os]
     if: ${{ always() }}
     steps:
       - run: exit 1

@@ -247,8 +247,15 @@ func (c *criService) CreateContainer(ctx context.Context, r *runtime.CreateConta
 			sandboxConfig.GetLogDirectory(), config.GetLogPath())
 	}
 
-	containerIO, err := cio.NewContainerIO(id,
-		cio.WithNewFIFOs(volatileContainerRootDir, config.GetTty(), config.GetStdin()))
+	var containerIO *cio.ContainerIO
+	switch ociRuntime.IOType {
+	case criconfig.IOTypeStreaming:
+		containerIO, err = cio.NewContainerIO(id,
+			cio.WithStreams(sandbox.Endpoint.Address, config.GetTty(), config.GetStdin()))
+	default:
+		containerIO, err = cio.NewContainerIO(id,
+			cio.WithNewFIFOs(volatileContainerRootDir, config.GetTty(), config.GetStdin()))
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to create container io: %w", err)
 	}
@@ -344,7 +351,7 @@ func (c *criService) CreateContainer(ctx context.Context, r *runtime.CreateConta
 // volumeMounts sets up image volumes for container. Rely on the removal of container
 // root directory to do cleanup. Note that image volume will be skipped, if there is criMounts
 // specified with the same destination.
-func (c *criService) volumeMounts(platform platforms.Platform, containerRootDir string, containerConfig *runtime.ContainerConfig, config *imagespec.ImageConfig) []*runtime.Mount {
+func (c *criService) volumeMounts(platform imagespec.Platform, containerRootDir string, containerConfig *runtime.ContainerConfig, config *imagespec.ImageConfig) []*runtime.Mount {
 	var uidMappings, gidMappings []*runtime.IDMapping
 	if platform.OS == "linux" {
 		if usernsOpts := containerConfig.GetLinux().GetSecurityContext().GetNamespaceOptions().GetUsernsOptions(); usernsOpts != nil {
@@ -392,7 +399,7 @@ func (c *criService) volumeMounts(platform platforms.Platform, containerRootDir 
 }
 
 // runtimeSpec returns a default runtime spec used in cri-containerd.
-func (c *criService) runtimeSpec(id string, platform platforms.Platform, baseSpecFile string, opts ...oci.SpecOpts) (*runtimespec.Spec, error) {
+func (c *criService) runtimeSpec(id string, platform imagespec.Platform, baseSpecFile string, opts ...oci.SpecOpts) (*runtimespec.Spec, error) {
 	// GenerateSpec needs namespace.
 	ctx := util.NamespacedContext()
 	container := &containers.Container{ID: id}
@@ -475,7 +482,7 @@ func generateUserString(username string, uid, gid *runtime.Int64Value) (string, 
 // runtime information (rootfs mounted), or platform specific checks with
 // no defined workaround (yet) to specify for other platforms.
 func (c *criService) platformSpecOpts(
-	platform platforms.Platform,
+	platform imagespec.Platform,
 	config *runtime.ContainerConfig,
 	imageConfig *imagespec.ImageConfig,
 ) ([]oci.SpecOpts, error) {
@@ -522,7 +529,7 @@ func (c *criService) platformSpecOpts(
 
 // buildContainerSpec build container's OCI spec depending on controller's target platform OS.
 func (c *criService) buildContainerSpec(
-	platform platforms.Platform,
+	platform imagespec.Platform,
 	id string,
 	sandboxID string,
 	sandboxPid uint32,
@@ -556,7 +563,6 @@ func (c *criService) buildContainerSpec(
 			id,
 			sandboxID,
 			sandboxPid,
-			netNSPath,
 			containerName,
 			imageName,
 			config,
@@ -568,9 +574,7 @@ func (c *criService) buildContainerSpec(
 		)
 	case isWindows:
 		specOpts, err = c.buildWindowsSpec(
-			id,
 			sandboxID,
-			sandboxPid,
 			netNSPath,
 			containerName,
 			imageName,
@@ -579,11 +583,9 @@ func (c *criService) buildContainerSpec(
 			imageConfig,
 			extraMounts,
 			ociRuntime,
-			runtimeHandler,
 		)
 	case isDarwin:
 		specOpts, err = c.buildDarwinSpec(
-			id,
 			sandboxID,
 			containerName,
 			imageName,
@@ -592,7 +594,6 @@ func (c *criService) buildContainerSpec(
 			imageConfig,
 			extraMounts,
 			ociRuntime,
-			runtimeHandler,
 		)
 	default:
 		return nil, fmt.Errorf("unsupported spec platform: %s", platform.OS)
@@ -609,7 +610,6 @@ func (c *criService) buildLinuxSpec(
 	id string,
 	sandboxID string,
 	sandboxPid uint32,
-	netNSPath string,
 	containerName string,
 	imageName string,
 	config *runtime.ContainerConfig,
@@ -839,9 +839,7 @@ func (c *criService) buildLinuxSpec(
 }
 
 func (c *criService) buildWindowsSpec(
-	id string,
 	sandboxID string,
-	sandboxPid uint32,
 	netNSPath string,
 	containerName string,
 	imageName string,
@@ -850,7 +848,6 @@ func (c *criService) buildWindowsSpec(
 	imageConfig *imagespec.ImageConfig,
 	extraMounts []*runtime.Mount,
 	ociRuntime criconfig.Runtime,
-	runtimeHandler *runtime.RuntimeHandler,
 ) (_ []oci.SpecOpts, retErr error) {
 	var specOpts []oci.SpecOpts
 	specOpts = append(specOpts, customopts.WithProcessCommandLineOrArgsForWindows(config, imageConfig))
@@ -868,6 +865,8 @@ func (c *criService) buildWindowsSpec(
 		specOpts = append(specOpts, oci.WithProcessCwd(config.GetWorkingDir()))
 	} else if imageConfig.WorkingDir != "" {
 		specOpts = append(specOpts, oci.WithProcessCwd(imageConfig.WorkingDir))
+	} else if cntrHpc {
+		specOpts = append(specOpts, oci.WithProcessCwd(`C:\hpc`))
 	}
 
 	if config.GetTty() {
@@ -936,7 +935,6 @@ func (c *criService) buildWindowsSpec(
 }
 
 func (c *criService) buildDarwinSpec(
-	id string,
 	sandboxID string,
 	containerName string,
 	imageName string,
@@ -945,7 +943,6 @@ func (c *criService) buildDarwinSpec(
 	imageConfig *imagespec.ImageConfig,
 	extraMounts []*runtime.Mount,
 	ociRuntime criconfig.Runtime,
-	runtimeHandler *runtime.RuntimeHandler,
 ) (_ []oci.SpecOpts, retErr error) {
 	specOpts := []oci.SpecOpts{
 		customopts.WithProcessArgs(config, imageConfig),

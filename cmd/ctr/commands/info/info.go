@@ -17,9 +17,8 @@
 package info
 
 import (
-	api "github.com/containerd/containerd/v2/api/services/introspection/v1"
+	api "github.com/containerd/containerd/api/services/introspection/v1"
 	"github.com/containerd/containerd/v2/cmd/ctr/commands"
-	ptypes "github.com/containerd/containerd/v2/protobuf/types"
 	"github.com/urfave/cli/v2"
 )
 
@@ -38,7 +37,7 @@ var Command = &cli.Command{
 		}
 		defer cancel()
 		var info Info
-		info.Server, err = client.IntrospectionService().Server(ctx, &ptypes.Empty{})
+		info.Server, err = client.IntrospectionService().Server(ctx)
 		if err != nil {
 			return err
 		}

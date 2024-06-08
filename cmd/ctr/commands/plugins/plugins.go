@@ -24,7 +24,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/containerd/containerd/v2/api/types"
+	"github.com/containerd/containerd/api/types"
 	"github.com/containerd/containerd/v2/cmd/ctr/commands"
 	"github.com/containerd/platforms"
 	pluginutils "github.com/containerd/plugin"
@@ -71,7 +71,7 @@ var listCommand = &cli.Command{
 		}
 		defer cancel()
 		ps := client.IntrospectionService()
-		response, err := ps.Plugins(ctx, context.Args().Slice())
+		response, err := ps.Plugins(ctx, context.Args().Slice()...)
 		if err != nil {
 			return err
 		}

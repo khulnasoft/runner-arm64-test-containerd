@@ -138,13 +138,13 @@ for the list of actively tested versions. Kubernetes only supports n-3 minor
 release versions and containerd will ensure there is always a supported version
 of containerd for every supported version of Kubernetes.
 
-| Kubernetes Version | containerd Version | CRI Version     |
-|--------------------|--------------------|-----------------|
-| 1.24               | 1.7.0+, 1.6.4+     | v1, v1alpha2    |
-| 1.25               | 1.7.0+, 1.6.4+     | v1, v1alpha2 ** |
-| 1.26               | 1.7.0+, 1.6.15+    | v1              |
-| 1.27               | 1.7.0+, 1.6.15+    | v1              |
-| 1.28               | 1.7.0+, 1.6.15+    | v1              |
+| Kubernetes Version | containerd Version            | CRI Version     |
+|--------------------|-------------------------------|-----------------|
+| 1.26               | 1.7.0+, 1.6.15+               | v1, v1alpha2 ** |
+| 1.27               | 1.7.0+, 1.6.15+               | v1              |
+| 1.28               | 1.7.0+, 1.6.15+               | v1              |
+| 1.29               | 1.7.11+, 1.6.27+              | v1              |
+| 1.30(wip)          | 2.0(wip), 1.7.13+, 1.6.28+    | v1              |
 
 ** Note: containerd v1.6.*, and v1.7.* support CRI v1 and v1alpha2 through EOL as those releases continue to support older versions of k8s, cloud providers, and other clients using CRI v1alpha2. CRI v1alpha2 is deprecated in v1.7 and will be removed in containerd v2.0.
 
@@ -277,6 +277,36 @@ and new fields on messages may be added if they are optional.
 `*.pb.txt` files are generated at each API release. They prevent unintentional changes
 to the API by having a diff that the CI can run. These files are not intended to be
 consumed or used by clients.
+
+As of containerd 2.0, the API version diverges from the main containerd version.
+While containerd 2.0 is a _major_ version jump for containerd, the API will remain
+on 1.x to remain backwards compatible with prior releases and existing clients.
+The 2.0 release adds the API to a separate Go module which can remain as the
+`github.com/containerd/containerd/api` Go package and imported separately from the
+rest of containerd.
+
+The API minor version will continue to be incremented for each major and minor
+version release of containerd. However, the API is tagged directly out of the
+main branch with the minor version incrementing earlier in the next release cycle
+rather than at the end. This means that after the containerd 2.0 release, the next
+API change is tagged as `api/v1.9.0` prior to any containerd 2.1 release. The
+latest API version should be backported to all supported versions and patch
+releases for prior API versions should be avoided if possible.
+
+
+| Containerd Version | API Version at Release |
+|--------------------|------------------------|
+| v1.0               | 1.0                    |
+| v1.1               | 1.1                    |
+| v1.2               | 1.2                    |
+| v1.3               | 1.3                    |
+| v1.4               | 1.4                    |
+| v1.5               | 1.5                    |
+| v1.6               | 1.6                    |
+| v1.7               | 1.7                    |
+| v2.0               | 1.8                    |
+| next               | 1.9                    |
+
 
 ### Metrics API
 
@@ -432,9 +462,9 @@ The deprecated properties in [`config.toml`](./docs/cri/config.md) are shown in 
 |`[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.*]`         | `runtime_engine`             | containerd v1.3     | containerd v2.0 ✅         | Use runtime v2                                  |
 |`[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.*]`         | `runtime_root`               | containerd v1.3     | containerd v2.0 ✅         | Use `options.Root`                              |
 |`[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.*.options]` | `CriuPath`                   | containerd v1.7     | containerd v2.0 ✅         | Set `$PATH` to the `criu` binary                |
-|`[plugins."io.containerd.grpc.v1.cri".registry]`                      | `auths`                      | containerd v1.3     | containerd v2.0            | Use [`ImagePullSecrets`](https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/). See also [#8228](https://github.com/containerd/containerd/issues/8228). |
-|`[plugins."io.containerd.grpc.v1.cri".registry]`                      | `configs`                    | containerd v1.5     | containerd v2.0            | Use [`config_path`](./docs/hosts.md)            |
-|`[plugins."io.containerd.grpc.v1.cri".registry]`                      | `mirrors`                    | containerd v1.5     | containerd v2.0            | Use [`config_path`](./docs/hosts.md)            |
+|`[plugins."io.containerd.grpc.v1.cri".registry]`                      | `auths`                      | containerd v1.3     | containerd v2.1            | Use [`ImagePullSecrets`](https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/). See also [#8228](https://github.com/containerd/containerd/issues/8228). |
+|`[plugins."io.containerd.grpc.v1.cri".registry]`                      | `configs`                    | containerd v1.5     | containerd v2.1            | Use [`config_path`](./docs/hosts.md)            |
+|`[plugins."io.containerd.grpc.v1.cri".registry]`                      | `mirrors`                    | containerd v1.5     | containerd v2.1            | Use [`config_path`](./docs/hosts.md)            |
 |`[plugins."io.containerd.tracing.processor.v1.otlp"]`                 | `endpoint`, `protocol`, `insecure` | containerd v1.6.29 | containerd v2.0       | Use [OTLP environment variables](https://opentelemetry.io/docs/specs/otel/protocol/exporter/), e.g. OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, OTEL_EXPORTER_OTLP_PROTOCOL, OTEL_SDK_DISABLED    |
 |`[plugins."io.containerd.internal.v1.tracing"]`                       | `service_name`, `sampling_ratio`   | containerd v1.6.29 | containerd v2.0       | Instead use [OTel environment variables](https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-variables/), e.g. OTEL_SERVICE_NAME, OTEL_TRACES_SAMPLER*  |
 

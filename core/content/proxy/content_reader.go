@@ -19,7 +19,7 @@ package proxy
 import (
 	"context"
 
-	contentapi "github.com/containerd/containerd/v2/api/services/content/v1"
+	contentapi "github.com/containerd/containerd/api/services/content/v1"
 	digest "github.com/opencontainers/go-digest"
 )
 
@@ -27,7 +27,7 @@ type remoteReaderAt struct {
 	ctx    context.Context
 	digest digest.Digest
 	size   int64
-	client contentapi.ContentClient
+	client contentapi.TTRPCContentClient
 }
 
 func (ra *remoteReaderAt) Size() int64 {

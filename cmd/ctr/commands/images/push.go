@@ -104,8 +104,22 @@ var pushCommand = &cli.Command{
 			if local == "" {
 				local = ref
 			}
-			reg := registry.NewOCIRegistry(ref, nil, ch)
-			is := image.NewStore(local)
+			opts := []registry.Opt{registry.WithCredentials(ch), registry.WithHostDir(context.String("hosts-dir"))}
+			if context.Bool("plain-http") {
+				opts = append(opts, registry.WithDefaultScheme("http"))
+			}
+			reg, err := registry.NewOCIRegistry(ctx, ref, opts...)
+			if err != nil {
+				return err
+			}
+			var p []ocispec.Platform
+			if pss := context.StringSlice("platform"); len(pss) > 0 {
+				p, err = platforms.ParseAll(pss)
+				if err != nil {
+					return fmt.Errorf("invalid platform %v: %w", pss, err)
+				}
+			}
+			is := image.NewStore(local, image.WithPlatforms(p...))
 
 			pf, done := ProgressHandler(ctx, os.Stdout)
 			defer done()

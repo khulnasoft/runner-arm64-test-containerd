@@ -39,15 +39,15 @@ compile_fuzzers() {
 
 # This is from https://github.com/AdamKorcz/instrumentation
 cd $SRC/instrumentation
-go run main.go $SRC/containerd/images
+go run main.go --target_dir $SRC/containerd/images
 
 apt-get update && apt-get install -y wget
 cd $SRC
-wget --quiet https://go.dev/dl/go1.21.6.linux-amd64.tar.gz
+wget --quiet https://go.dev/dl/go1.22.4.linux-amd64.tar.gz
 
 mkdir temp-go
 rm -rf /root/.go/*
-tar -C temp-go/ -xzf go1.21.6.linux-amd64.tar.gz
+tar -C temp-go/ -xzf go1.22.4.linux-amd64.tar.gz
 mv temp-go/go/* /root/.go/
 cd $SRC/containerd
 

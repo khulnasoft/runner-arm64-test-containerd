@@ -265,6 +265,17 @@ func (c *criService) RunPodSandbox(ctx context.Context, r *runtime.RunPodSandbox
 		return nil, fmt.Errorf("failed to start sandbox %q: %w", id, err)
 	}
 
+	if ctrl.Address != "" {
+		sandbox.Endpoint = sandboxstore.Endpoint{
+			Version: ctrl.Version,
+			Address: ctrl.Address,
+		}
+	}
+
+	if sandboxInfo, err = c.client.SandboxStore().Update(ctx, sandboxInfo, "extensions"); err != nil {
+		return nil, fmt.Errorf("unable to update extensions for sandbox %q: %w", id, err)
+	}
+
 	if !hostNetwork(config) && userNsEnabled {
 		// If userns is enabled, then the netns was created by the OCI runtime
 		// on controller.Start(). The OCI runtime needs to create the netns
@@ -406,7 +417,7 @@ func (c *criService) RunPodSandbox(ctx context.Context, r *runtime.RunPodSandbox
 	//
 	// TaskOOM from containerd may come before sandbox is added to store,
 	// but we don't care about sandbox TaskOOM right now, so it is fine.
-	c.eventMonitor.startSandboxExitMonitor(context.Background(), id, exitCh)
+	c.startSandboxExitMonitor(context.Background(), id, exitCh)
 
 	// Send CONTAINER_STARTED event with ContainerId equal to SandboxId.
 	c.generateAndSendContainerEvent(ctx, id, id, runtime.ContainerEventType_CONTAINER_STARTED_EVENT)
@@ -444,7 +455,12 @@ func (c *criService) setupPodNetwork(ctx context.Context, sandbox *sandboxstore.
 	if netPlugin == nil {
 		return errors.New("cni config not initialized")
 	}
-
+	if c.config.UseInternalLoopback {
+		err := c.bringUpLoopback(path)
+		if err != nil {
+			return fmt.Errorf("unable to set lo to up: %w", err)
+		}
+	}
 	opts, err := cniNamespaceOpts(id, config)
 	if err != nil {
 		return fmt.Errorf("get cni namespace options: %w", err)

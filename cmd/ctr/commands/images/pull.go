@@ -18,6 +18,7 @@ package images
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -89,7 +90,7 @@ command. As part of this process, we do the following:
 			ref = context.Args().First()
 		)
 		if ref == "" {
-			return fmt.Errorf("please provide an image reference to pull")
+			return errors.New("please provide an image reference to pull")
 		}
 
 		client, ctx, cancel, err := commands.NewClient(context)
@@ -105,20 +106,20 @@ command. As part of this process, we do the following:
 			}
 
 			var sopts []image.StoreOpt
+			p, err := platforms.ParseAll(context.StringSlice("platform"))
+			if err != nil {
+				return err
+			}
+
+			// Set unpack configuration
+			for _, platform := range p {
+				sopts = append(sopts, image.WithUnpack(platform, context.String("snapshotter")))
+			}
 			if !context.Bool("all-platforms") {
-				p, err := platforms.ParseAll(context.StringSlice("platform"))
-				if err != nil {
-					return err
-				}
 				if len(p) == 0 {
 					p = append(p, platforms.DefaultSpec())
 				}
 				sopts = append(sopts, image.WithPlatforms(p...))
-
-				// Set unpack configuration
-				for _, platform := range p {
-					sopts = append(sopts, image.WithUnpack(platform, context.String("snapshotter")))
-				}
 			}
 			// TODO: Support unpack for all platforms..?
 			// Pass in a *?
@@ -131,8 +132,19 @@ command. As part of this process, we do the following:
 			} else if !context.Bool("skip-metadata") {
 				sopts = append(sopts, image.WithAllMetadata)
 			}
+			labels := context.StringSlice("label")
+			if len(labels) > 0 {
+				sopts = append(sopts, image.WithImageLabels(commands.LabelArgs(labels)))
+			}
 
-			reg := registry.NewOCIRegistry(ref, nil, ch)
+			opts := []registry.Opt{registry.WithCredentials(ch), registry.WithHostDir(context.String("hosts-dir"))}
+			if context.Bool("plain-http") {
+				opts = append(opts, registry.WithDefaultScheme("http"))
+			}
+			reg, err := registry.NewOCIRegistry(ctx, ref, opts...)
+			if err != nil {
+				return err
+			}
 			is := image.NewStore(ref, sopts...)
 
 			pf, done := ProgressHandler(ctx, os.Stdout)

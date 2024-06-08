@@ -25,12 +25,12 @@ import (
 	"github.com/containerd/errdefs"
 	"github.com/containerd/log"
 
-	eventtypes "github.com/containerd/containerd/v2/api/events"
+	eventtypes "github.com/containerd/containerd/api/events"
 	"github.com/containerd/containerd/v2/core/sandbox"
 	"github.com/containerd/containerd/v2/internal/cri/server/podsandbox/types"
 	sandboxstore "github.com/containerd/containerd/v2/internal/cri/store/sandbox"
 	ctrdutil "github.com/containerd/containerd/v2/internal/cri/util"
-	"github.com/containerd/containerd/v2/protobuf"
+	"github.com/containerd/containerd/v2/pkg/protobuf"
 )
 
 func (c *Controller) Stop(ctx context.Context, sandboxID string, _ ...sandbox.StopOpt) error {
@@ -95,8 +95,8 @@ func (c *Controller) stopSandboxContainer(ctx context.Context, podSandbox *types
 		go func() {
 			defer close(stopCh)
 			err := c.waitSandboxExit(exitCtx, podSandbox, exitCh)
-			if err != nil {
-				log.G(ctx).WithError(err).Errorf("Failed to wait pod sandbox exit %+v", err)
+			if err != nil && err != context.Canceled && err != context.DeadlineExceeded {
+				log.G(ctx).WithError(err).Errorf("Failed to wait sandbox exit %+v", err)
 			}
 		}()
 		defer func() {

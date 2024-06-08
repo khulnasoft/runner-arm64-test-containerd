@@ -25,13 +25,13 @@ import (
 	"path/filepath"
 	gruntime "runtime"
 
-	"github.com/containerd/containerd/v2/api/runtime/task/v2"
+	"github.com/containerd/containerd/api/runtime/task/v2"
 	"github.com/containerd/containerd/v2/core/runtime"
-	client "github.com/containerd/containerd/v2/core/runtime/v2/shim"
 	"github.com/containerd/containerd/v2/pkg/namespaces"
-	"github.com/containerd/containerd/v2/protobuf"
-	"github.com/containerd/containerd/v2/protobuf/proto"
-	"github.com/containerd/containerd/v2/protobuf/types"
+	"github.com/containerd/containerd/v2/pkg/protobuf"
+	"github.com/containerd/containerd/v2/pkg/protobuf/proto"
+	"github.com/containerd/containerd/v2/pkg/protobuf/types"
+	client "github.com/containerd/containerd/v2/pkg/shim"
 	"github.com/containerd/log"
 )
 
@@ -39,7 +39,7 @@ type shimBinaryConfig struct {
 	runtime      string
 	address      string
 	ttrpcAddress string
-	schedCore    bool
+	env          []string
 }
 
 func shimBinary(bundle *Bundle, config shimBinaryConfig) *binary {
@@ -48,7 +48,7 @@ func shimBinary(bundle *Bundle, config shimBinaryConfig) *binary {
 		runtime:                config.runtime,
 		containerdAddress:      config.address,
 		containerdTTRPCAddress: config.ttrpcAddress,
-		schedCore:              config.schedCore,
+		env:                    config.env,
 	}
 }
 
@@ -56,8 +56,8 @@ type binary struct {
 	runtime                string
 	containerdAddress      string
 	containerdTTRPCAddress string
-	schedCore              bool
 	bundle                 *Bundle
+	env                    []string
 }
 
 func (b *binary) Start(ctx context.Context, opts *types.Any, onClose func()) (_ *shim, err error) {
@@ -77,7 +77,7 @@ func (b *binary) Start(ctx context.Context, opts *types.Any, onClose func()) (_ 
 			Path:         b.bundle.Path,
 			Opts:         opts,
 			Args:         args,
-			SchedCore:    b.schedCore,
+			Env:          b.env,
 		})
 	if err != nil {
 		return nil, err
@@ -143,10 +143,12 @@ func (b *binary) Start(ctx context.Context, opts *types.Any, onClose func()) (_ 
 	if err := writeBootstrapParams(filepath.Join(b.bundle.Path, "bootstrap.json"), params); err != nil {
 		return nil, fmt.Errorf("failed to write bootstrap.json: %w", err)
 	}
-
+	// The address is in the form like ttrpc+unix://<uds-path> or grpc+vsock://<cid>:<port>
+	address := fmt.Sprintf("%s+%s", params.Protocol, params.Address)
 	return &shim{
 		bundle:  b.bundle,
 		client:  conn,
+		address: address,
 		version: params.Version,
 	}, nil
 }

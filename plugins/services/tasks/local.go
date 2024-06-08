@@ -26,9 +26,10 @@ import (
 	"path/filepath"
 	"time"
 
-	api "github.com/containerd/containerd/v2/api/services/tasks/v1"
-	"github.com/containerd/containerd/v2/api/types"
-	"github.com/containerd/containerd/v2/api/types/task"
+	api "github.com/containerd/containerd/api/services/tasks/v1"
+	"github.com/containerd/containerd/api/types"
+	"github.com/containerd/containerd/api/types/runc/options"
+	"github.com/containerd/containerd/api/types/task"
 	"github.com/containerd/containerd/v2/core/containers"
 	"github.com/containerd/containerd/v2/core/content"
 	"github.com/containerd/containerd/v2/core/events"
@@ -36,17 +37,16 @@ import (
 	"github.com/containerd/containerd/v2/core/metadata"
 	"github.com/containerd/containerd/v2/core/mount"
 	"github.com/containerd/containerd/v2/core/runtime"
-	"github.com/containerd/containerd/v2/core/runtime/v2/runc/options"
 	"github.com/containerd/containerd/v2/pkg/archive"
 	"github.com/containerd/containerd/v2/pkg/blockio"
 	"github.com/containerd/containerd/v2/pkg/filters"
+	"github.com/containerd/containerd/v2/pkg/protobuf"
+	"github.com/containerd/containerd/v2/pkg/protobuf/proto"
+	ptypes "github.com/containerd/containerd/v2/pkg/protobuf/types"
 	"github.com/containerd/containerd/v2/pkg/rdt"
 	"github.com/containerd/containerd/v2/pkg/timeout"
 	"github.com/containerd/containerd/v2/plugins"
 	"github.com/containerd/containerd/v2/plugins/services"
-	"github.com/containerd/containerd/v2/protobuf"
-	"github.com/containerd/containerd/v2/protobuf/proto"
-	ptypes "github.com/containerd/containerd/v2/protobuf/types"
 	"github.com/containerd/errdefs"
 	"github.com/containerd/log"
 	"github.com/containerd/plugin"
@@ -155,10 +155,23 @@ func (l *local) Create(ctx context.Context, r *api.CreateTaskRequest, _ ...grpc.
 	if err != nil {
 		return nil, errdefs.ToGRPC(err)
 	}
-	checkpointPath, err := getRestorePath(container.Runtime.Name, r.Options)
-	if err != nil {
-		return nil, err
+
+	var (
+		checkpointPath string
+		taskAPIAddress string
+		taskAPIVersion uint32
+	)
+
+	if r.Options != nil {
+		taskOptions, err := formatOptions(container.Runtime.Name, r.Options)
+		if err != nil {
+			return nil, err
+		}
+		checkpointPath = taskOptions.CriuImagePath
+		taskAPIAddress = taskOptions.TaskApiAddress
+		taskAPIVersion = taskOptions.TaskApiVersion
 	}
+
 	// jump get checkpointPath from checkpoint image
 	if checkpointPath == "" && r.Checkpoint != nil {
 		checkpointPath, err = os.MkdirTemp(os.Getenv("XDG_RUNTIME_DIR"), "ctrd-checkpoint")
@@ -196,6 +209,8 @@ func (l *local) Create(ctx context.Context, r *api.CreateTaskRequest, _ ...grpc.
 		RuntimeOptions: container.Runtime.Options,
 		TaskOptions:    r.Options,
 		SandboxID:      container.SandboxID,
+		Address:        taskAPIAddress,
+		Version:        taskAPIVersion,
 	}
 	if r.RuntimePath != "" {
 		opts.Runtime = r.RuntimePath
@@ -723,22 +738,14 @@ func getCheckpointPath(runtime string, option *ptypes.Any) (string, error) {
 	return checkpointPath, nil
 }
 
-// getRestorePath only suitable for runc runtime now
-func getRestorePath(runtime string, option *ptypes.Any) (string, error) {
-	if option == nil {
-		return "", nil
-	}
-
-	var restorePath string
+func formatOptions(runtime string, option *ptypes.Any) (*options.Options, error) {
 	v, err := typeurl.UnmarshalAny(option)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	opts, ok := v.(*options.Options)
 	if !ok {
-		return "", fmt.Errorf("invalid task create option for %s", runtime)
+		return nil, fmt.Errorf("invalid task create option for %s", runtime)
 	}
-	restorePath = opts.CriuImagePath
-
-	return restorePath, nil
+	return opts, nil
 }

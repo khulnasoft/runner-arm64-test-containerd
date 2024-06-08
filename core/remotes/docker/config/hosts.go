@@ -244,7 +244,7 @@ func ConfigureHosts(ctx context.Context, options HostOptions) docker.RegistryHos
 
 			// When TLS has been configured for the operation or host and
 			// the protocol from the port number is ambiguous, use the
-			// docker.HTTPFallback roundtripper to catch TLS errors and re-attempt the
+			// docker.NewHTTPFallback roundtripper to catch TLS errors and re-attempt the
 			// request as http. This allows preference for https when configured but
 			// also catches TLS errors early enough in the request to avoid sending
 			// the request twice or consuming the request body.
@@ -253,7 +253,7 @@ func ConfigureHosts(ctx context.Context, options HostOptions) docker.RegistryHos
 				if port != "" && port != "80" {
 					log.G(ctx).WithField("host", host.host).Info("host will try HTTPS first since it is configured for HTTP with a TLS configuration, consider changing host to HTTPS or removing unused TLS configuration")
 					host.scheme = "https"
-					rhosts[i].Client.Transport = docker.HTTPFallback{RoundTripper: rhosts[i].Client.Transport}
+					rhosts[i].Client.Transport = docker.NewHTTPFallback(rhosts[i].Client.Transport)
 				}
 			}
 
@@ -308,7 +308,7 @@ func loadHostDir(ctx context.Context, hostsDir string) ([]hostConfig, error) {
 
 	hosts, err := parseHostsFile(hostsDir, b)
 	if err != nil {
-		log.G(ctx).WithError(err).Error("failed to decode hosts.toml")
+		log.G(ctx).WithError(err).Errorf("failed to decode %s", filepath.Join(hostsDir, "hosts.toml"))
 		// Fallback to checking certificate files
 		return loadCertFiles(ctx, hostsDir)
 	}
